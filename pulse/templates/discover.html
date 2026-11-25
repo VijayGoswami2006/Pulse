@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+{% block title %}Discover{% endblock %}
+{% block page_title %}Discover{% endblock %}
+{% block page_subtitle %}Collect articles, research papers and custom content{% endblock %}
+
+{% block topbar_actions %}
+<button class="btn btn-primary" onclick="fetchFeeds()">
+  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+    <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/>
+  </svg>
+  Refresh Feeds
+</button>
+{% endblock %}
+
+{% block content %}
+
+<!-- Search + Filter Row -->
+<div class="flex gap-12 mb-16 items-center" style="flex-wrap:wrap;">
+  <div class="search-bar" style="max-width:340px;">
+    <svg class="search-icon" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+    </svg>
+    <input type="text" id="search-input" class="form-input" placeholder="Search articles…"
+           oninput="debounceSearch()" style="padding-left:38px;">
+  </div>
+  <div class="filter-tabs" id="category-tabs">
+    <button class="filter-tab active" data-cat="" onclick="filterCategory(this,'')">All</button>
+    <button class="filter-tab" data-cat="Technology" onclick="filterCategory(this,'Technology')">Technology</button>
+    <button class="filter-tab" data-cat="Programming" onclick="filterCategory(this,'Programming')">Programming</button>
+    <button class="filter-tab" data-cat="Business" onclick="filterCategory(this,'Business')">Business</button>
+    <button class="filter-tab" data-cat="Science" onclick="filterCategory(this,'Science')">Science</button>
+    <button class="filter-tab" data-cat="Research" onclick="filterCategory(this,'Research')">Research</button>
+    <button class="filter-tab" data-cat="General" onclick="filterCategory(this,'General')">General</button>
+  </div>
+  <div style="margin-left:auto; display:flex; gap:8px;">
+    <button class="btn btn-secondary btn-sm" onclick="openAddModal()">+ Add URL</button>
+    <button class="btn btn-secondary btn-sm" onclick="openArxivModal()">📄 arXiv</button>
+  </div>
+</div>
+
+<!-- Feed refresh status -->
+<div class="ai-loading hidden" id="fetch-loading">
+  <div class="spinner spinner-sm"></div>
+  Fetching articles from RSS feeds — this may take a moment…
+</div>
+
+<!-- Article Grid -->
+<div id="articles-container">
+  <div class="article-grid" id="article-grid"></div>
+  <div class="empty-state hidden" id="articles-empty">
+    <div class="empty-icon">📰</div>
+    <div class="empty-title">No articles found</div>
+    <div class="empty-desc">Refresh feeds to collect articles, or add a custom URL.</div>
+    <button class="btn btn-primary mt-12" onclick="fetchFeeds()">Fetch Now</button>
+  </div>
+</div>
+
+<!-- Pagination -->
+<div class="flex gap-8 items-center mt-20" id="pagination" style="justify-content:center;">
+  <button class="btn btn-secondary btn-sm" id="prev-btn" onclick="changePage(-1)" disabled>← Prev</button>
+  <span id="page-info" class="text-sm text-muted"></span>
+  <button class="btn btn-secondary btn-sm" id="next-btn" onclick="changePage(1)">Next →</button>
+</div>
+
+<!-- Add URL Modal -->
+<div class="modal-overlay hidden" id="add-url-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Add Custom Content</div>
+      <button class="modal-close" onclick="closeModal('add-url-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">URL (article page)</label>
+        <input type="url" id="custom-url" class="form-input" placeholder="https://example.com/article">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Or paste text directly</label>
+        <textarea id="custom-text" class="form-input form-textarea" placeholder="Paste the article text here…" rows="5"></textarea>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Title</label>
+          <input type="text" id="custom-title" class="form-input" placeholder="Article title">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Category</label>
+          <select id="custom-category" class="form-input form-select">
+            <option>Technology</option><option>Programming</option><option>Business</option>
+            <option>Science</option><option>Research</option><option>General</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('add-url-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitCustomContent()">Add Content</button>
+    </div>
+  </div>
+</div>
+
+<!-- arXiv Modal -->
+<div class="modal-overlay hidden" id="arxiv-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Fetch arXiv Research Papers</div>
+      <button class="modal-close" onclick="closeModal('arxiv-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Search Query</label>
+        <input type="text" id="arxiv-query" class="form-input" placeholder="e.g. large language models, machine learning…">
+        <div class="form-hint">Searches arXiv titles and abstracts.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <select id="arxiv-category" class="form-input form-select">
+          <option value="cs.AI">AI (cs.AI)</option>
+          <option value="cs.LG">Machine Learning (cs.LG)</option>
+          <option value="cs.CL">Computation & Language (cs.CL)</option>
+          <option value="cs.CV">Computer Vision (cs.CV)</option>
+          <option value="stat.ML">Statistics ML (stat.ML)</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('arxiv-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="fetchArxiv()">Fetch Papers</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentPage = 1;
+let currentSearch = '';
+let currentCategory = '';
+const PAGE_SIZE = 24;
+
+// Load articles on page load
+document.addEventListener('DOMContentLoaded', loadArticles);
+
+function loadArticles() {
+  const params = new URLSearchParams({
+    page: currentPage,
+    search: currentSearch,
+    category: currentCategory,
+    limit: PAGE_SIZE
+  });
+
+  fetch('/api/articles?' + params)
+    .then(r => r.json())
+    .then(data => {
+      renderArticles(data.articles);
+      updatePagination(data.total, data.page, data.pages);
+      document.getElementById('nav-article-count').textContent = data.total;
+    })
+    .catch(() => showToast('Failed to load articles', 'error'));
+}
+
+function renderArticles(articles) {
+  const grid = document.getElementById('article-grid');
+  const empty = document.getElementById('articles-empty');
+
+  if (!articles.length) {
+    grid.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+
+  empty.classList.add('hidden');
+  grid.innerHTML = articles.map(a => `
+    <div class="article-card">
+      <div class="article-source">
+        <span class="source-badge">${escHtml(a.source || 'Unknown')}</span>
+        <span class="article-date">${formatDate(a.published || a.created_at)}</span>
+      </div>
+      <div class="article-title">
+        ${a.url ? `<a href="${escHtml(a.url)}" target="_blank" rel="noopener">${escHtml(a.title)}</a>` : escHtml(a.title)}
+      </div>
+      <div class="article-summary">${escHtml(a.summary || 'No summary available.')}</div>
+      <div class="article-tags">
+        <span class="tag">${escHtml(a.category || 'General')}</span>
+        ${a.author ? `<span class="tag">by ${escHtml(a.author)}</span>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function updatePagination(total, page, pages) {
+  document.getElementById('page-info').textContent = `Page ${page} of ${pages || 1} (${total} articles)`;
+  document.getElementById('prev-btn').disabled = page <= 1;
+  document.getElementById('next-btn').disabled = page >= pages;
+}
+
+function changePage(dir) {
+  currentPage = Math.max(1, currentPage + dir);
+  loadArticles();
+  window.scrollTo(0, 0);
+}
+
+let searchTimer;
+function debounceSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    currentSearch = document.getElementById('search-input').value;
+    currentPage = 1;
+    loadArticles();
+  }, 350);
+}
+
+function filterCategory(btn, cat) {
+  document.querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentCategory = cat;
+  currentPage = 1;
+  loadArticles();
+}
+
+function fetchFeeds() {
+  document.getElementById('fetch-loading').classList.remove('hidden');
+  fetch('/api/fetch-feeds', { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('fetch-loading').classList.add('hidden');
+      showToast(`✅ Fetched ${data.new_articles} new articles`, 'success');
+      currentPage = 1;
+      loadArticles();
+    })
+    .catch(() => {
+      document.getElementById('fetch-loading').classList.add('hidden');
+      showToast('Failed to fetch feeds', 'error');
+    });
+}
+
+function fetchArxiv() {
+  const query = document.getElementById('arxiv-query').value.trim();
+  const category = document.getElementById('arxiv-category').value;
+  if (!query) { showToast('Enter a search query', 'warning'); return; }
+  closeModal('arxiv-modal');
+  document.getElementById('fetch-loading').classList.remove('hidden');
+  fetch('/api/fetch-arxiv', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ query, category })
+  })
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('fetch-loading').classList.add('hidden');
+      showToast(`✅ Fetched ${data.new_articles} arXiv papers`, 'success');
+      loadArticles();
+    })
+    .catch(() => {
+      document.getElementById('fetch-loading').classList.add('hidden');
+      showToast('Failed to fetch arXiv papers', 'error');
+    });
+}
+
+function submitCustomContent() {
+  const url = document.getElementById('custom-url').value.trim();
+  const text = document.getElementById('custom-text').value.trim();
+  const title = document.getElementById('custom-title').value.trim();
+  const category = document.getElementById('custom-category').value;
+
+  if (!url && !text) { showToast('Provide a URL or paste some text', 'warning'); return; }
+
+  closeModal('add-url-modal');
+  showGlobalLoader('Adding content…');
+
+  fetch('/api/add-content', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ url, text, title, category })
+  })
+    .then(r => r.json())
+    .then(data => {
+      hideGlobalLoader();
+      showToast(data.message || 'Content added', 'success');
+      loadArticles();
+      document.getElementById('custom-url').value = '';
+      document.getElementById('custom-text').value = '';
+      document.getElementById('custom-title').value = '';
+    })
+    .catch(() => { hideGlobalLoader(); showToast('Failed to add content', 'error'); });
+}
+
+function openAddModal()  { openModal('add-url-modal'); }
+function openArxivModal(){ openModal('arxiv-modal'); }
+</script>
+{% endblock %}

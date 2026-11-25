@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% block title %}AI Intelligence{% endblock %}
+{% block page_title %}AI Intelligence{% endblock %}
+{% block page_subtitle %}Analyse content, discover themes and get blog ideas powered by IBM Granite{% endblock %}
+
+{% block topbar_actions %}
+<button class="btn btn-purple" onclick="runAnalysis()">
+  ✨ Run Analysis
+</button>
+{% endblock %}
+
+{% block content %}
+
+<div class="grid-2" style="align-items:start;">
+
+  <!-- Left: Controls + Results -->
+  <div style="display:flex;flex-direction:column;gap:20px;">
+
+    <!-- Analysis Config -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Configure Analysis</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Select articles to analyse</label>
+        <select id="analysis-scope" class="form-input form-select">
+          <option value="recent">Recent 20 articles</option>
+          <option value="all">All collected articles</option>
+          <option value="category">By category</option>
+        </select>
+      </div>
+
+      <div class="form-group hidden" id="category-select-group">
+        <label class="form-label">Category</label>
+        <select id="analysis-category" class="form-input form-select">
+          <option>Technology</option><option>Programming</option><option>Business</option>
+          <option>Science</option><option>Research</option><option>General</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Analysis type</label>
+        <div class="filter-tabs" style="margin-bottom:0;" id="analysis-type-tabs">
+          <button class="filter-tab active" data-type="full" onclick="setAnalysisType(this,'full')">Full Analysis</button>
+          <button class="filter-tab" data-type="themes" onclick="setAnalysisType(this,'themes')">Themes</button>
+          <button class="filter-tab" data-type="topics" onclick="setAnalysisType(this,'topics')">Blog Topics</button>
+          <button class="filter-tab" data-type="summary" onclick="setAnalysisType(this,'summary')">Summary</button>
+        </div>
+      </div>
+
+      <button class="btn btn-purple w-full" onclick="runAnalysis()" style="margin-top:4px;">
+        ✨ Analyse with IBM Granite
+      </button>
+    </div>
+
+    <!-- AI Result -->
+    <div id="analysis-result-wrapper" class="hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Analysis Results</div>
+          <button class="btn btn-secondary btn-sm" onclick="copyResult()">Copy</button>
+        </div>
+        <div class="ai-loading hidden" id="analysis-loading">
+          <div class="spinner spinner-sm"></div>
+          IBM Granite is analysing your content…
+        </div>
+        <div id="analysis-result" class="ai-result-box" style="margin-top:0;">
+          <div class="ai-label">IBM Granite</div>
+          <div id="analysis-text"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Blog Topic Suggestions -->
+    <div id="topic-suggestions-wrapper" class="hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">💡 Suggested Blog Topics</div>
+          <span class="text-sm text-muted" id="topic-count"></span>
+        </div>
+        <div id="topic-suggestions-list"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Right: Saved Suggestions -->
+  <div class="card" style="position:sticky; top:76px;">
+    <div class="card-header">
+      <div>
+        <div class="card-title">⭐ Saved Suggestions</div>
+        <div class="card-subtitle" id="saved-count">0 saved</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="loadSaved()">Refresh</button>
+    </div>
+    <div id="saved-suggestions-list">
+      <div class="empty-state" style="padding:20px 0;">
+        <div class="empty-title">No saved suggestions yet</div>
+        <div class="empty-desc">Run an analysis and save interesting topics.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let analysisType = 'full';
+
+document.addEventListener('DOMContentLoaded', loadSaved);
+
+document.getElementById('analysis-scope').addEventListener('change', function() {
+  const catGroup = document.getElementById('category-select-group');
+  catGroup.classList.toggle('hidden', this.value !== 'category');
+});
+
+function setAnalysisType(btn, type) {
+  document.querySelectorAll('#analysis-type-tabs .filter-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  analysisType = type;
+}
+
+function runAnalysis() {
+  const scope = document.getElementById('analysis-scope').value;
+  const category = scope === 'category' ? document.getElementById('analysis-category').value : '';
+
+  document.getElementById('analysis-result-wrapper').classList.remove('hidden');
+  document.getElementById('analysis-loading').classList.remove('hidden');
+  document.getElementById('analysis-text').textContent = '';
+  document.getElementById('topic-suggestions-wrapper').classList.add('hidden');
+
+  fetch('/api/analyse', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ scope, category, type: analysisType })
+  })
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('analysis-loading').classList.add('hidden');
+
+      if (data.error) {
+        document.getElementById('analysis-text').textContent = '⚠ ' + data.error;
+        return;
+      }
+
+      document.getElementById('analysis-text').textContent = data.result || '';
+
+      if (data.topics && data.topics.length) {
+        renderTopicSuggestions(data.topics);
+      }
+    })
+    .catch(e => {
+      document.getElementById('analysis-loading').classList.add('hidden');
+      document.getElementById('analysis-text').textContent = 'Error running analysis. Please try again.';
+    });
+}
+
+function renderTopicSuggestions(topics) {
+  const wrapper = document.getElementById('topic-suggestions-wrapper');
+  const list = document.getElementById('topic-suggestions-list');
+  document.getElementById('topic-count').textContent = `${topics.length} suggestions`;
+
+  list.innerHTML = topics.map((t, i) => `
+    <div class="topic-card mb-16">
+      <div class="topic-name">${escHtml(t.title || t.topic || t)}</div>
+      ${t.explanation ? `<div class="topic-explanation">${escHtml(t.explanation)}</div>` : ''}
+      ${t.keywords && t.keywords.length ? `
+        <div class="article-tags mb-16">${t.keywords.map(k => `<span class="tag">${escHtml(k)}</span>`).join('')}</div>
+      ` : ''}
+      ${t.titles && t.titles.length ? `
+        <div style="font-size:12px;color:var(--text-3);margin-bottom:6px;">Alternative titles:</div>
+        <ul style="font-size:13px;padding-left:16px;color:var(--text-2);">
+          ${t.titles.map(x => `<li>${escHtml(x)}</li>`).join('')}
+        </ul>
+      ` : ''}
+      <div style="margin-top:12px;">
+        <button class="btn btn-purple btn-sm" onclick='saveSuggestion(${JSON.stringify(t)})'>
+          ⭐ Save
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick='useInEditor(${JSON.stringify(t.title || t.topic || "")})'>
+          ✏️ Write Draft
+        </button>
+      </div>
+    </div>
+  `).join('');
+
+  wrapper.classList.remove('hidden');
+}
+
+function saveSuggestion(topic) {
+  fetch('/api/suggestions', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      topic: topic.title || topic.topic || String(topic),
+      explanation: topic.explanation || '',
+      suggested_titles: topic.titles || [],
+      keywords: topic.keywords || [],
+      content_angle: topic.angle || ''
+    })
+  })
+    .then(r => r.json())
+    .then(() => { showToast('Suggestion saved ⭐', 'success'); loadSaved(); })
+    .catch(() => showToast('Could not save', 'error'));
+}
+
+function useInEditor(title) {
+  window.location.href = '/editor?title=' + encodeURIComponent(title);
+}
+
+function loadSaved() {
+  fetch('/api/suggestions')
+    .then(r => r.json())
+    .then(data => {
+      const list = document.getElementById('saved-suggestions-list');
+      document.getElementById('saved-count').textContent = `${data.suggestions.length} saved`;
+
+      if (!data.suggestions.length) {
+        list.innerHTML = `<div class="empty-state" style="padding:20px 0;">
+          <div class="empty-title">No saved suggestions yet</div>
+          <div class="empty-desc">Run an analysis and save interesting topics.</div>
+        </div>`;
+        return;
+      }
+
+      list.innerHTML = data.suggestions.map(s => `
+        <div class="trend-item" style="flex-direction:column; align-items:flex-start; gap:4px; padding:10px 0;">
+          <div style="display:flex;width:100%;align-items:center;gap:8px;">
+            <div style="font-size:14px;font-weight:600;color:var(--text);flex:1;">${escHtml(s.topic)}</div>
+            <button class="btn btn-ghost btn-sm" onclick="deleteSuggestion(${s.id})" title="Delete">×</button>
+          </div>
+          ${s.explanation ? `<div class="text-sm text-muted" style="line-height:1.5;">${escHtml(s.explanation.slice(0,120))}${s.explanation.length>120?'…':''}</div>` : ''}
+          <div style="margin-top:4px;">
+            <button class="btn btn-secondary btn-sm" onclick='useInEditor(${JSON.stringify(s.topic)})'>✏️ Write</button>
+          </div>
+        </div>
+      `).join('');
+    });
+}
+
+function deleteSuggestion(id) {
+  fetch(`/api/suggestions/${id}`, { method: 'DELETE' })
+    .then(() => { showToast('Deleted', 'success'); loadSaved(); });
+}
+
+function copyResult() {
+  const text = document.getElementById('analysis-text').textContent;
+  navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard', 'success'));
+}
+</script>
+{% endblock %}

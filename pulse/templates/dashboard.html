@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block page_subtitle %}Good to see you — here's your writing overview{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+
+<!-- Stat Cards -->
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-icon" style="background:var(--accent-light);color:var(--accent);">📰</div>
+    <div class="stat-label">Articles Collected</div>
+    <div class="stat-value" id="stat-articles">{{ stats.article_count }}</div>
+    <div class="stat-trend">From RSS &amp; research feeds</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:var(--purple-light);color:var(--purple);">💡</div>
+    <div class="stat-label">Saved Ideas</div>
+    <div class="stat-value" id="stat-ideas">{{ stats.idea_count }}</div>
+    <div class="stat-trend">In your workspace</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:var(--green-light);color:var(--green);">📝</div>
+    <div class="stat-label">Blog Drafts</div>
+    <div class="stat-value" id="stat-drafts">{{ stats.draft_count }}</div>
+    <div class="stat-trend">Saved drafts</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:var(--amber-light);color:var(--amber);">⭐</div>
+    <div class="stat-label">AI Suggestions</div>
+    <div class="stat-value" id="stat-suggestions">{{ stats.suggestion_count }}</div>
+    <div class="stat-trend">Saved from intelligence</div>
+  </div>
+</div>
+
+<!-- Charts Row -->
+<div class="grid-2 mb-20">
+  <!-- Source Distribution -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">Content Source Distribution</div>
+        <div class="card-subtitle">Articles by category</div>
+      </div>
+    </div>
+    <div class="chart-wrapper">
+      <canvas id="sourceChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Topic Popularity -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">Topic Popularity</div>
+        <div class="card-subtitle">Trending topics by score</div>
+      </div>
+    </div>
+    <div class="chart-wrapper">
+      <canvas id="topicChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- Bottom Row -->
+<div class="grid-2">
+
+  <!-- Trending Topics -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">🔥 Trending Topics</div>
+        <div class="card-subtitle">Based on recent article activity</div>
+      </div>
+      <a href="{{ url_for('intelligence') }}" class="btn btn-secondary btn-sm">Analyse →</a>
+    </div>
+    {% if stats.trending_topics %}
+      {% for topic in stats.trending_topics %}
+      <div class="trend-item">
+        <div class="trend-rank">#{{ loop.index }}</div>
+        <div class="trend-name">{{ topic.topic }}</div>
+        <div class="trend-count">{{ topic.mention_count }} mentions</div>
+        <div class="trend-arrow">↑</div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state" style="padding:24px 0;">
+        <div class="empty-title">No trends yet</div>
+        <div class="empty-desc">Collect some articles to start tracking topics.</div>
+        <a href="{{ url_for('discover') }}" class="btn btn-primary btn-sm mt-12">Discover Content</a>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- Recent Drafts -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">📝 Recent Drafts</div>
+        <div class="card-subtitle">Your latest work</div>
+      </div>
+      <a href="{{ url_for('editor') }}" class="btn btn-secondary btn-sm">View All →</a>
+    </div>
+    {% if stats.recent_drafts %}
+      {% for draft in stats.recent_drafts %}
+      <div class="trend-item" style="cursor:pointer;" onclick="window.location='{{ url_for('editor') }}?draft={{ draft.id }}'">
+        <div style="flex:1;">
+          <div style="font-size:14px;font-weight:500;color:var(--text);">{{ draft.title }}</div>
+          <div style="font-size:12px;color:var(--text-3);">{{ draft.word_count }} words · {{ draft.updated_at[:10] }}</div>
+        </div>
+        <span class="idea-status status-{{ draft.status }}">{{ draft.status }}</span>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state" style="padding:24px 0;">
+        <div class="empty-title">No drafts yet</div>
+        <div class="empty-desc">Start writing your first blog post.</div>
+        <a href="{{ url_for('editor') }}" class="btn btn-primary btn-sm mt-12">New Draft</a>
+      </div>
+    {% endif %}
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Chart.js — Source Distribution (Doughnut)
+const catData = {{ stats.category_distribution | tojson }};
+const topicData = {{ stats.trending_topics | tojson }};
+
+const palette = [
+  '#3b82d4','#7c5cd8','#16a34a','#d97706',
+  '#dc2626','#06b6d4','#8b5cf6','#f59e0b'
+];
+
+// Source doughnut
+const srcCtx = document.getElementById('sourceChart');
+if (srcCtx) {
+  new Chart(srcCtx, {
+    type: 'doughnut',
+    data: {
+      labels: catData.map(c => c.category),
+      datasets: [{
+        data: catData.map(c => c.count),
+        backgroundColor: palette,
+        borderWidth: 2,
+        borderColor: '#fff'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'right', labels: { font: { size: 12 }, boxWidth: 12, padding: 12 } }
+      },
+      cutout: '65%'
+    }
+  });
+}
+
+// Topic bar chart
+const topicCtx = document.getElementById('topicChart');
+if (topicCtx) {
+  new Chart(topicCtx, {
+    type: 'bar',
+    data: {
+      labels: topicData.slice(0,8).map(t => t.topic.length > 16 ? t.topic.slice(0,16)+'…' : t.topic),
+      datasets: [{
+        label: 'Score',
+        data: topicData.slice(0,8).map(t => Math.round(t.score)),
+        backgroundColor: palette,
+        borderRadius: 6,
+        borderSkipped: false
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { grid: { color: '#f0f1f5' }, ticks: { font: { size: 11 } } },
+        x: { grid: { display: false }, ticks: { font: { size: 11 }, maxRotation: 35 } }
+      }
+    }
+  });
+}
+</script>
+{% endblock %}

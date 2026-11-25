@@ -1,0 +1,458 @@
+{% extends "base.html" %}
+{% block title %}Blog Editor{% endblock %}
+{% block page_title %}Blog Editor{% endblock %}
+{% block page_subtitle %}Write, refine and export your blog posts{% endblock %}
+
+{% block topbar_actions %}
+<button class="btn btn-secondary btn-sm" onclick="openDraftsPanel()">📂 My Drafts</button>
+<button class="btn btn-secondary btn-sm" onclick="newDraft()">+ New Draft</button>
+<button class="btn btn-primary btn-sm" onclick="saveDraft()">💾 Save</button>
+{% endblock %}
+
+{% block content %}
+
+<div class="editor-wrapper">
+
+  <!-- Main Editor -->
+  <div>
+    <div class="editor-main">
+      <div class="editor-toolbar">
+        <!-- Tone selector -->
+        <select id="tone-select" class="form-input form-select" style="width:160px; padding:5px 10px; font-size:12px;">
+          <option value="professional">Professional</option>
+          <option value="conversational">Conversational</option>
+          <option value="informative">Informative</option>
+          <option value="persuasive">Persuasive</option>
+        </select>
+
+        <div class="editor-sep"></div>
+
+        <button class="editor-toolbar-btn" onclick="aiAction('intro')">✨ Introduction</button>
+        <button class="editor-toolbar-btn" onclick="aiAction('conclusion')">✨ Conclusion</button>
+        <button class="editor-toolbar-btn" onclick="aiAction('expand')">🔄 Expand</button>
+        <button class="editor-toolbar-btn" onclick="aiAction('rewrite')">✏️ Rewrite</button>
+
+        <div class="editor-sep"></div>
+
+        <button class="editor-toolbar-btn" onclick="exportDraft('txt')">⬇ TXT</button>
+        <button class="editor-toolbar-btn" onclick="exportDraft('md')">⬇ MD</button>
+      </div>
+
+      <input type="text" id="draft-title" class="editor-title-input"
+             placeholder="Untitled draft…" oninput="markUnsaved()">
+
+      <textarea id="draft-body" class="editor-body"
+                placeholder="Start writing here, or use the AI tools on the right to generate content…"
+                oninput="updateWordCount(); markUnsaved()"></textarea>
+
+      <div class="editor-meta">
+        <span id="word-count">0 words</span>
+        <span id="char-count">0 characters</span>
+        <span id="save-status" style="margin-left:auto; color:var(--text-3);">All saved</span>
+      </div>
+    </div>
+
+    <!-- AI Loading inside editor area -->
+    <div class="ai-loading hidden mt-12" id="editor-ai-loading">
+      <div class="spinner spinner-sm"></div>
+      <span id="editor-ai-loading-text">IBM Granite is working…</span>
+    </div>
+  </div>
+
+  <!-- Right Panel -->
+  <div class="editor-panel">
+    <input type="hidden" id="current-draft-id" value="">
+    <input type="hidden" id="current-idea-id" value="">
+
+    <!-- Outline Generator -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">📋 Outline</div>
+        <button class="btn btn-ghost btn-sm" onclick="generateOutline()">Generate</button>
+      </div>
+      <div id="outline-loading" class="hidden" style="font-size:12px;color:var(--text-3);padding:6px 0;">Generating…</div>
+      <ul class="outline-list" id="outline-list">
+        <li style="font-size:13px;color:var(--text-3);padding:4px 0;">Generate an outline to see sections here.</li>
+      </ul>
+    </div>
+
+    <!-- AI Tools -->
+    <div class="card">
+      <div class="card-title" style="margin-bottom:12px;">🤖 AI Tools</div>
+
+      <div class="form-group">
+        <label class="form-label">Custom prompt</label>
+        <textarea id="custom-prompt" class="form-input" rows="3"
+          placeholder="e.g. Add a call-to-action section about…"></textarea>
+      </div>
+      <button class="btn btn-purple w-full" onclick="runCustomPrompt()">✨ Run Prompt</button>
+
+      <div class="divider"></div>
+
+      <div class="form-group">
+        <label class="form-label">Keyword suggestions</label>
+        <div id="keyword-tags" style="min-height:32px;"></div>
+        <button class="btn btn-secondary btn-sm w-full mt-8" onclick="suggestKeywords()">Get Keywords</button>
+      </div>
+    </div>
+
+    <!-- Export -->
+    <div class="card">
+      <div class="card-title" style="margin-bottom:12px;">📤 Export</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button class="btn btn-secondary w-full" onclick="exportDraft('txt')">Download as TXT</button>
+        <button class="btn btn-secondary w-full" onclick="exportDraft('md')">Download as Markdown</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Drafts Drawer -->
+<div class="modal-overlay hidden" id="drafts-panel">
+  <div class="modal" style="max-width:680px;">
+    <div class="modal-header">
+      <div class="modal-title">📂 My Drafts</div>
+      <button class="modal-close" onclick="closeModal('drafts-panel')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="drafts-list" style="display:flex;flex-direction:column;gap:10px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- AI Result modal for inline insertions -->
+<div class="modal-overlay hidden" id="ai-result-modal">
+  <div class="modal" style="max-width:640px;">
+    <div class="modal-header">
+      <div class="modal-title">✨ IBM Granite Result</div>
+      <button class="modal-close" onclick="closeModal('ai-result-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="ai-result-box">
+        <div class="ai-label">IBM Granite</div>
+        <div id="ai-result-content"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('ai-result-modal')">Discard</button>
+      <button class="btn btn-primary" onclick="insertAiResult()">Insert into Editor</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let unsaved = false;
+let lastAiResult = '';
+
+// Pre-fill from URL params
+document.addEventListener('DOMContentLoaded', () => {
+  const params = new URLSearchParams(window.location.search);
+  const title = params.get('title');
+  const draftId = params.get('draft');
+  const ideaId = params.get('idea_id');
+
+  if (draftId) {
+    loadDraft(draftId);
+  } else if (title) {
+    document.getElementById('draft-title').value = title;
+  }
+
+  if (ideaId) {
+    document.getElementById('current-idea-id').value = ideaId;
+  }
+
+  updateWordCount();
+});
+
+// Auto-save every 30 seconds
+setInterval(() => { if (unsaved) saveDraft(true); }, 30000);
+
+function markUnsaved() {
+  unsaved = true;
+  document.getElementById('save-status').textContent = 'Unsaved changes';
+  document.getElementById('save-status').style.color = 'var(--amber)';
+}
+
+function updateWordCount() {
+  const text = document.getElementById('draft-body').value;
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  document.getElementById('word-count').textContent = `${words} words`;
+  document.getElementById('char-count').textContent = `${text.length} characters`;
+}
+
+function saveDraft(silent = false) {
+  const title = document.getElementById('draft-title').value.trim() || 'Untitled';
+  const content = document.getElementById('draft-body').value;
+  const tone = document.getElementById('tone-select').value;
+  const draftId = document.getElementById('current-draft-id').value;
+  const ideaId = document.getElementById('current-idea-id').value;
+
+  const method = draftId ? 'PUT' : 'POST';
+  const url = draftId ? `/api/drafts/${draftId}` : '/api/drafts';
+
+  fetch(url, {
+    method,
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ title, content, tone, idea_id: ideaId || null })
+  })
+    .then(r => r.json())
+    .then(resp => {
+      if (!draftId && resp.id) document.getElementById('current-draft-id').value = resp.id;
+      unsaved = false;
+      document.getElementById('save-status').textContent = 'Saved ✓';
+      document.getElementById('save-status').style.color = 'var(--green)';
+      if (!silent) showToast('Draft saved', 'success');
+      document.getElementById('nav-draft-count').textContent = resp.total_drafts || '';
+      setTimeout(() => document.getElementById('save-status').textContent = 'All saved', 3000);
+    })
+    .catch(() => { if (!silent) showToast('Save failed', 'error'); });
+}
+
+function newDraft() {
+  if (unsaved && !confirm('You have unsaved changes. Start new draft anyway?')) return;
+  document.getElementById('draft-title').value = '';
+  document.getElementById('draft-body').value = '';
+  document.getElementById('current-draft-id').value = '';
+  document.getElementById('current-idea-id').value = '';
+  document.getElementById('outline-list').innerHTML = '<li style="font-size:13px;color:var(--text-3);padding:4px 0;">Generate an outline to see sections here.</li>';
+  document.getElementById('keyword-tags').innerHTML = '';
+  updateWordCount();
+  unsaved = false;
+  document.getElementById('save-status').textContent = 'All saved';
+  document.getElementById('save-status').style.color = 'var(--text-3)';
+}
+
+function openDraftsPanel() {
+  openModal('drafts-panel');
+  loadDraftsList();
+}
+
+function loadDraftsList() {
+  fetch('/api/drafts')
+    .then(r => r.json())
+    .then(data => {
+      const list = document.getElementById('drafts-list');
+      if (!data.drafts.length) {
+        list.innerHTML = `<div class="empty-state"><div class="empty-title">No drafts yet</div></div>`;
+        return;
+      }
+      list.innerHTML = data.drafts.map(d => `
+        <div style="border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:flex;align-items:center;gap:12px;">
+          <div style="flex:1;">
+            <div style="font-size:14px;font-weight:600;">${escHtml(d.title)}</div>
+            <div style="font-size:12px;color:var(--text-3);">${d.word_count} words · ${formatDate(d.updated_at)}</div>
+          </div>
+          <span class="idea-status status-${d.status}">${d.status}</span>
+          <button class="btn btn-secondary btn-sm" onclick="loadDraft(${d.id}); closeModal('drafts-panel');">Open</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteDraft(${d.id})">Delete</button>
+        </div>
+      `).join('');
+    });
+}
+
+function loadDraft(id) {
+  fetch(`/api/drafts/${id}`)
+    .then(r => r.json())
+    .then(draft => {
+      document.getElementById('draft-title').value = draft.title || '';
+      document.getElementById('draft-body').value = draft.content || '';
+      document.getElementById('tone-select').value = draft.tone || 'professional';
+      document.getElementById('current-draft-id').value = draft.id;
+      updateWordCount();
+      unsaved = false;
+      document.getElementById('save-status').textContent = 'All saved';
+      document.getElementById('save-status').style.color = 'var(--text-3)';
+
+      // Load outline if exists
+      try {
+        const outline = JSON.parse(draft.outline || '[]');
+        if (outline.length) renderOutline(outline);
+      } catch {}
+    });
+}
+
+function deleteDraft(id) {
+  if (!confirm('Delete this draft?')) return;
+  fetch(`/api/drafts/${id}`, { method: 'DELETE' })
+    .then(() => { showToast('Draft deleted', 'success'); loadDraftsList(); });
+}
+
+function generateOutline() {
+  const title = document.getElementById('draft-title').value.trim();
+  if (!title) { showToast('Add a title first', 'warning'); return; }
+  const tone = document.getElementById('tone-select').value;
+
+  document.getElementById('outline-loading').classList.remove('hidden');
+
+  fetch('/api/generate-outline', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ title, tone })
+  })
+    .then(r => r.json())
+    .then(resp => {
+      document.getElementById('outline-loading').classList.add('hidden');
+      if (resp.outline) {
+        // Parse sections from outline text
+        const lines = resp.outline.split('\n').filter(l => l.trim());
+        renderOutline(lines);
+      }
+    })
+    .catch(() => document.getElementById('outline-loading').classList.add('hidden'));
+}
+
+function renderOutline(sections) {
+  const list = document.getElementById('outline-list');
+  list.innerHTML = sections.map((s, i) => `
+    <li class="outline-item">
+      <span class="outline-item-num">${i+1}</span>
+      <span style="flex:1;font-size:13px;">${escHtml(String(s).replace(/^[\d\.\-\*]+\s*/, ''))}</span>
+      <button class="btn btn-ghost btn-sm" onclick="expandSection('${escHtml(String(s).replace(/'/g,"\\'"))}')"
+              title="Expand this section">+</button>
+    </li>
+  `).join('');
+}
+
+function aiAction(type) {
+  const title = document.getElementById('draft-title').value.trim();
+  const body = document.getElementById('draft-body').value;
+  const tone = document.getElementById('tone-select').value;
+
+  if (type === 'expand' || type === 'rewrite') {
+    const selected = window.getSelection().toString().trim();
+    if (!selected && !body) { showToast('Write something first or select text to ' + type, 'warning'); return; }
+  }
+
+  const textarea = document.getElementById('draft-body');
+  const selectedText = window.getSelection().toString().trim() || body.slice(0, 500);
+
+  document.getElementById('editor-ai-loading').classList.remove('hidden');
+  document.getElementById('editor-ai-loading-text').textContent = `IBM Granite is generating ${type}…`;
+
+  fetch('/api/editor-ai', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ type, title, content: body, selected: selectedText, tone })
+  })
+    .then(r => r.json())
+    .then(resp => {
+      document.getElementById('editor-ai-loading').classList.add('hidden');
+      if (resp.error) { showToast('AI error: ' + resp.error, 'error'); return; }
+      lastAiResult = resp.result || '';
+      document.getElementById('ai-result-content').textContent = lastAiResult;
+      openModal('ai-result-modal');
+    })
+    .catch(() => {
+      document.getElementById('editor-ai-loading').classList.add('hidden');
+      showToast('AI request failed', 'error');
+    });
+}
+
+function expandSection(section) {
+  const tone = document.getElementById('tone-select').value;
+  document.getElementById('editor-ai-loading').classList.remove('hidden');
+  document.getElementById('editor-ai-loading-text').textContent = 'Expanding section…';
+
+  fetch('/api/editor-ai', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ type: 'expand_section', title: section, tone })
+  })
+    .then(r => r.json())
+    .then(resp => {
+      document.getElementById('editor-ai-loading').classList.add('hidden');
+      lastAiResult = resp.result || '';
+      document.getElementById('ai-result-content').textContent = lastAiResult;
+      openModal('ai-result-modal');
+    })
+    .catch(() => document.getElementById('editor-ai-loading').classList.add('hidden'));
+}
+
+function runCustomPrompt() {
+  const prompt = document.getElementById('custom-prompt').value.trim();
+  if (!prompt) { showToast('Enter a prompt first', 'warning'); return; }
+
+  const title = document.getElementById('draft-title').value;
+  const body = document.getElementById('draft-body').value;
+  const tone = document.getElementById('tone-select').value;
+
+  document.getElementById('editor-ai-loading').classList.remove('hidden');
+  document.getElementById('editor-ai-loading-text').textContent = 'Running your prompt…';
+
+  fetch('/api/editor-ai', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ type: 'custom', title, content: body, prompt, tone })
+  })
+    .then(r => r.json())
+    .then(resp => {
+      document.getElementById('editor-ai-loading').classList.add('hidden');
+      lastAiResult = resp.result || '';
+      document.getElementById('ai-result-content').textContent = lastAiResult;
+      openModal('ai-result-modal');
+    })
+    .catch(() => document.getElementById('editor-ai-loading').classList.add('hidden'));
+}
+
+function insertAiResult() {
+  const textarea = document.getElementById('draft-body');
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const current = textarea.value;
+  const before = current.substring(0, start);
+  const after = current.substring(end);
+  textarea.value = before + (before && !before.endsWith('\n') ? '\n\n' : '') + lastAiResult + '\n\n' + after;
+  updateWordCount();
+  markUnsaved();
+  closeModal('ai-result-modal');
+}
+
+function suggestKeywords() {
+  const title = document.getElementById('draft-title').value;
+  const body = document.getElementById('draft-body').value;
+  if (!title && !body) { showToast('Write something first', 'warning'); return; }
+
+  fetch('/api/editor-ai', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ type: 'keywords', title, content: body.slice(0,500) })
+  })
+    .then(r => r.json())
+    .then(resp => {
+      const kw = resp.keywords || [];
+      document.getElementById('keyword-tags').innerHTML = kw.map(k =>
+        `<span class="tag" style="cursor:pointer;margin:2px;" onclick="navigator.clipboard.writeText('${escHtml(k)}')">${escHtml(k)}</span>`
+      ).join('');
+    });
+}
+
+function exportDraft(format) {
+  const title = document.getElementById('draft-title').value.trim() || 'pulse-draft';
+  const content = document.getElementById('draft-body').value;
+
+  let text = content;
+  let filename = title.replace(/[^a-z0-9]/gi, '-').toLowerCase();
+  let mime = 'text/plain';
+
+  if (format === 'md') {
+    text = `# ${title}\n\n${content}`;
+    filename += '.md';
+    mime = 'text/markdown';
+  } else {
+    filename += '.txt';
+  }
+
+  const blob = new Blob([text], { type: mime });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast(`Exported as ${format.toUpperCase()}`, 'success');
+}
+</script>
+{% endblock %}

@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block page_title %}Settings{% endblock %}
+{% block page_subtitle %}Configure PULSE — API credentials, feeds and preferences{% endblock %}
+
+{% block content %}
+
+<div style="max-width:720px; display:flex; flex-direction:column; gap:24px;">
+
+  <!-- AI Configuration -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">🤖 IBM watsonx.ai Configuration</div>
+        <div class="card-subtitle">Required for AI features (summarisation, topic suggestions, writing assistance)</div>
+      </div>
+      <span id="ai-connection-badge" class="idea-status {% if not demo_mode %}status-refined{% else %}status-draft{% endif %}">
+        {% if demo_mode %}Demo Mode{% else %}Connected{% endif %}
+      </span>
+    </div>
+
+    {% if demo_mode %}
+    <div style="background:var(--amber-light);border:1px solid #fcd34d;border-radius:8px;padding:12px 16px;font-size:13px;color:#92400e;margin-bottom:16px;">
+      ⚠️ <strong>Demo Mode active.</strong> AI responses are simulated. Add your IBM Cloud API key below to enable real IBM Granite AI.
+    </div>
+    {% else %}
+    <div style="background:var(--green-light);border:1px solid #86efac;border-radius:8px;padding:12px 16px;font-size:13px;color:#14532d;margin-bottom:16px;">
+      ✅ IBM Granite is connected and active.
+    </div>
+    {% endif %}
+
+    <div class="form-group">
+      <label class="form-label">IBM Cloud API Key</label>
+      <input type="password" id="watsonx-api-key" class="form-input"
+             placeholder="{{ '••••••••' if not demo_mode else 'Paste your IBM Cloud API key here' }}"
+             autocomplete="off">
+      <div class="form-hint">
+        Get your API key from
+        <a href="https://cloud.ibm.com/iam/apikeys" target="_blank">IBM Cloud IAM</a>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">watsonx.ai Project ID</label>
+      <input type="text" id="watsonx-project-id" class="form-input"
+             placeholder="{{ '••••••••' if not demo_mode else 'Your watsonx project ID' }}"
+             autocomplete="off">
+      <div class="form-hint">
+        Found in your
+        <a href="https://dataplatform.cloud.ibm.com/projects" target="_blank">watsonx.ai project settings</a>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Granite Model ID</label>
+      <select id="granite-model" class="form-input form-select">
+        <option value="ibm/granite-13b-instruct-v2">granite-13b-instruct-v2 (recommended)</option>
+        <option value="ibm/granite-3-8b-instruct">granite-3-8b-instruct</option>
+        <option value="ibm/granite-20b-multilingual">granite-20b-multilingual</option>
+      </select>
+    </div>
+
+    <div class="flex gap-8">
+      <button class="btn btn-primary" onclick="saveAISettings()">Save & Test Connection</button>
+      <button class="btn btn-secondary" onclick="testConnection()">Test Only</button>
+    </div>
+
+    <div id="connection-test-result" class="hidden mt-12" style="padding:10px 14px; border-radius:8px; font-size:13px;"></div>
+  </div>
+
+  <!-- RSS Feeds -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">📰 RSS Feeds</div>
+        <div class="card-subtitle">Manage content sources for the Discover feed</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="openAddFeedModal()">+ Add Feed</button>
+    </div>
+
+    <div style="font-size:13px;font-weight:600;color:var(--text-2);margin-bottom:8px;">Built-in Feeds</div>
+    <div id="builtin-feeds-list">
+      {% for feed in builtin_feeds %}
+      <div class="trend-item">
+        <div class="trend-name">{{ feed.name }}</div>
+        <span class="tag">{{ feed.category }}</span>
+        <div class="trend-count text-muted" style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">{{ feed.url }}</div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="divider"></div>
+    <div style="font-size:13px;font-weight:600;color:var(--text-2);margin-bottom:8px;">Custom Feeds</div>
+    <div id="custom-feeds-list">Loading…</div>
+  </div>
+
+  <!-- Interests -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">🎯 Content Interests</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Select your content categories of interest</label>
+      <div id="interests-grid" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
+        {% for interest in default_interests %}
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="checkbox" class="interest-cb" value="{{ interest }}"
+                 {% if interest in user_interests %}checked{% endif %}
+                 onchange="saveInterests()">
+          <span class="tag" style="cursor:pointer;">{{ interest }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Danger Zone -->
+  <div class="card" style="border-color:#fca5a5;">
+    <div class="card-title" style="margin-bottom:12px; color:var(--red);">⚠ Data Management</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn btn-danger btn-sm" onclick="clearArticles()">Clear All Articles</button>
+      <button class="btn btn-danger btn-sm" onclick="clearTrends()">Reset Trends</button>
+    </div>
+    <div class="form-hint mt-8">These actions cannot be undone.</div>
+  </div>
+
+</div>
+
+<!-- Add Feed Modal -->
+<div class="modal-overlay hidden" id="add-feed-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Add RSS Feed</div>
+      <button class="modal-close" onclick="closeModal('add-feed-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Feed Name</label>
+        <input type="text" id="feed-name" class="form-input" placeholder="e.g. My Tech Blog">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Feed URL</label>
+        <input type="url" id="feed-url" class="form-input" placeholder="https://example.com/feed.xml">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <select id="feed-category" class="form-input form-select">
+          <option>Technology</option><option>Programming</option><option>Business</option>
+          <option>Science</option><option>Research</option><option>General</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('add-feed-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="addFeed()">Add Feed</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', loadCustomFeeds);
+
+function loadCustomFeeds() {
+  fetch('/api/feeds')
+    .then(r => r.json())
+    .then(data => {
+      const list = document.getElementById('custom-feeds-list');
+      if (!data.feeds.length) {
+        list.innerHTML = '<div class="text-sm text-muted">No custom feeds added yet.</div>';
+        return;
+      }
+      list.innerHTML = data.feeds.map(f => `
+        <div class="trend-item">
+          <div class="trend-name">${escHtml(f.name)}</div>
+          <span class="tag">${escHtml(f.category)}</span>
+          <button class="btn btn-danger btn-sm" onclick="deleteFeed(${f.id})">Remove</button>
+        </div>
+      `).join('');
+    });
+}
+
+function addFeed() {
+  const name = document.getElementById('feed-name').value.trim();
+  const url = document.getElementById('feed-url').value.trim();
+  const category = document.getElementById('feed-category').value;
+  if (!name || !url) { showToast('Name and URL are required', 'warning'); return; }
+
+  fetch('/api/feeds', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ name, url, category })
+  })
+    .then(r => r.json())
+    .then(() => { closeModal('add-feed-modal'); showToast('Feed added', 'success'); loadCustomFeeds(); })
+    .catch(() => showToast('Could not add feed', 'error'));
+}
+
+function deleteFeed(id) {
+  fetch(`/api/feeds/${id}`, { method: 'DELETE' })
+    .then(() => { showToast('Feed removed', 'success'); loadCustomFeeds(); });
+}
+
+function openAddFeedModal() { openModal('add-feed-modal'); }
+
+function saveAISettings() {
+  const data = {
+    api_key: document.getElementById('watsonx-api-key').value.trim(),
+    project_id: document.getElementById('watsonx-project-id').value.trim(),
+    model_id: document.getElementById('granite-model').value
+  };
+
+  if (!data.api_key || !data.project_id) {
+    showToast('API key and Project ID are required', 'warning');
+    return;
+  }
+
+  showGlobalLoader('Saving and testing connection…');
+  fetch('/api/settings/ai', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(data)
+  })
+    .then(r => r.json())
+    .then(resp => {
+      hideGlobalLoader();
+      const result = document.getElementById('connection-test-result');
+      result.classList.remove('hidden');
+      if (resp.success) {
+        result.style.background = 'var(--green-light)';
+        result.style.color = '#14532d';
+        result.textContent = '✅ ' + (resp.message || 'Connected successfully!');
+        showToast('Settings saved!', 'success');
+        setTimeout(() => location.reload(), 1500);
+      } else {
+        result.style.background = 'var(--red-light)';
+        result.style.color = 'var(--red)';
+        result.textContent = '❌ ' + (resp.error || 'Connection failed. Check your credentials.');
+      }
+    })
+    .catch(() => { hideGlobalLoader(); showToast('Request failed', 'error'); });
+}
+
+function testConnection() {
+  fetch('/api/settings/test-ai')
+    .then(r => r.json())
+    .then(resp => {
+      const result = document.getElementById('connection-test-result');
+      result.classList.remove('hidden');
+      if (resp.success) {
+        result.style.background = 'var(--green-light)'; result.style.color = '#14532d';
+        result.textContent = '✅ ' + resp.message;
+      } else {
+        result.style.background = 'var(--red-light)'; result.style.color = 'var(--red)';
+        result.textContent = '❌ ' + resp.error;
+      }
+    });
+}
+
+function saveInterests() {
+  const selected = [...document.querySelectorAll('.interest-cb:checked')].map(cb => cb.value);
+  fetch('/api/settings/interests', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ interests: selected })
+  }).then(() => showToast('Interests updated', 'success'));
+}
+
+function clearArticles() {
+  if (!confirm('Delete all collected articles? This cannot be undone.')) return;
+  fetch('/api/admin/clear-articles', { method: 'POST' })
+    .then(() => { showToast('All articles cleared', 'success'); });
+}
+
+function clearTrends() {
+  if (!confirm('Reset all trend data?')) return;
+  fetch('/api/admin/clear-trends', { method: 'POST' })
+    .then(() => { showToast('Trend data reset', 'success'); });
+}
+</script>
+{% endblock %}

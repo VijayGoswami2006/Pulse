@@ -1,0 +1,362 @@
+{% extends "base.html" %}
+{% block title %}Idea Workspace{% endblock %}
+{% block page_title %}Idea Workspace{% endblock %}
+{% block page_subtitle %}Capture rough ideas and let AI refine them into blog concepts{% endblock %}
+
+{% block topbar_actions %}
+<button class="btn btn-primary" onclick="openNewIdeaModal()">+ New Idea</button>
+{% endblock %}
+
+{% block content %}
+
+<div class="grid-2" style="align-items:start; gap:24px;">
+
+  <!-- Left: New / Edit Idea Form -->
+  <div style="display:flex; flex-direction:column; gap:20px;">
+
+    <div class="card" id="idea-form-card">
+      <div class="card-header">
+        <div class="card-title" id="idea-form-title">💡 Capture an Idea</div>
+        <button class="btn btn-ghost btn-sm hidden" id="idea-cancel-btn" onclick="cancelIdeaEdit()">Cancel</button>
+      </div>
+
+      <input type="hidden" id="idea-id" value="">
+
+      <div class="form-group">
+        <label class="form-label">Your rough idea or notes</label>
+        <textarea id="idea-raw" class="form-input form-textarea" rows="5"
+          placeholder="Jot down your rough idea, any notes, questions, or observations you want to explore…"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Title (optional)</label>
+        <input type="text" id="idea-title-input" class="form-input" placeholder="Give it a working title">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Writing Tone</label>
+        <select id="idea-tone" class="form-input form-select">
+          <option value="professional">Professional</option>
+          <option value="conversational">Conversational</option>
+          <option value="informative">Informative</option>
+          <option value="persuasive">Persuasive</option>
+        </select>
+      </div>
+
+      <!-- Image Upload -->
+      <div class="form-group">
+        <label class="form-label">Visual Reference (optional)</label>
+        <div class="upload-zone" id="upload-zone" onclick="document.getElementById('image-input').click()">
+          <input type="file" id="image-input" accept="image/*" style="display:none" onchange="handleImageUpload(event)">
+          <div class="upload-zone-icon">🖼️</div>
+          <div class="upload-zone-text">Click to upload image</div>
+          <div class="upload-zone-hint">PNG, JPG, GIF, WebP up to 10MB</div>
+        </div>
+        <div id="image-preview" class="hidden mt-8">
+          <img id="preview-img" style="max-height:120px; border-radius:8px; border:1px solid var(--border);">
+          <button class="btn btn-ghost btn-sm mt-4" onclick="clearImage()">Remove image</button>
+        </div>
+      </div>
+
+      <div class="flex gap-8" style="flex-wrap:wrap;">
+        <button class="btn btn-secondary flex-1" onclick="saveIdeaOnly()">💾 Save</button>
+        <button class="btn btn-purple flex-1" onclick="refineIdea()">✨ Refine with AI</button>
+      </div>
+
+      <!-- AI Loading -->
+      <div class="ai-loading hidden mt-12" id="refine-loading">
+        <div class="spinner spinner-sm"></div>
+        IBM Granite is refining your idea…
+      </div>
+
+      <!-- AI Result -->
+      <div id="refine-result-wrapper" class="hidden mt-12">
+        <div class="ai-result-box">
+          <div class="ai-label">IBM Granite</div>
+          <div id="refine-result-text"></div>
+        </div>
+
+        <!-- Suggested Titles -->
+        <div id="suggested-titles-wrapper" class="hidden mt-16">
+          <div style="font-size:13px;font-weight:600;color:var(--text-2);margin-bottom:8px;">Suggested Titles:</div>
+          <div id="suggested-titles-list"></div>
+        </div>
+
+        <!-- Outline -->
+        <div id="outline-wrapper" class="hidden mt-16">
+          <div style="font-size:13px;font-weight:600;color:var(--text-2);margin-bottom:8px;">Blog Outline:</div>
+          <div id="outline-content" class="ai-result-box" style="font-size:13px;padding:14px;"></div>
+        </div>
+
+        <div class="flex gap-8 mt-12" style="flex-wrap:wrap;">
+          <button class="btn btn-primary btn-sm" onclick="saveRefinedIdea()">💾 Save Refined Idea</button>
+          <button class="btn btn-secondary btn-sm" onclick="generateOutline()">📋 Generate Outline</button>
+          <button class="btn btn-secondary btn-sm" onclick="writeDraftFromIdea()">✏️ Start Draft</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Right: Saved Ideas List -->
+  <div>
+    <div class="section-header mb-16">
+      <div>
+        <div class="section-title">Your Ideas</div>
+        <div class="section-subtitle" id="idea-list-count">Loading…</div>
+      </div>
+    </div>
+
+    <div id="ideas-list"></div>
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentIdeaData = {};
+let uploadedImagePath = '';
+
+document.addEventListener('DOMContentLoaded', loadIdeas);
+
+// Drag & drop support
+const zone = document.getElementById('upload-zone');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+zone.addEventListener('drop', e => {
+  e.preventDefault();
+  zone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) handleImageFile(e.dataTransfer.files[0]);
+});
+
+function handleImageUpload(event) {
+  if (event.target.files[0]) handleImageFile(event.target.files[0]);
+}
+
+function handleImageFile(file) {
+  const formData = new FormData();
+  formData.append('image', file);
+
+  fetch('/api/upload-image', { method: 'POST', body: formData })
+    .then(r => r.json())
+    .then(data => {
+      uploadedImagePath = data.path;
+      document.getElementById('preview-img').src = '/uploads/' + data.filename;
+      document.getElementById('image-preview').classList.remove('hidden');
+      showToast('Image uploaded', 'success');
+    })
+    .catch(() => showToast('Image upload failed', 'error'));
+}
+
+function clearImage() {
+  uploadedImagePath = '';
+  document.getElementById('preview-img').src = '';
+  document.getElementById('image-preview').classList.add('hidden');
+  document.getElementById('image-input').value = '';
+}
+
+function getIdeaFormData() {
+  return {
+    id: document.getElementById('idea-id').value,
+    raw_text: document.getElementById('idea-raw').value.trim(),
+    title: document.getElementById('idea-title-input').value.trim(),
+    tone: document.getElementById('idea-tone').value,
+    image_path: uploadedImagePath,
+  };
+}
+
+function saveIdeaOnly() {
+  const data = getIdeaFormData();
+  if (!data.raw_text) { showToast('Write something first!', 'warning'); return; }
+
+  const method = data.id ? 'PUT' : 'POST';
+  const url = data.id ? `/api/ideas/${data.id}` : '/api/ideas';
+
+  fetch(url, {
+    method,
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(data)
+  })
+    .then(r => r.json())
+    .then(resp => {
+      showToast('Idea saved!', 'success');
+      if (!data.id) {
+        document.getElementById('idea-id').value = resp.id;
+      }
+      loadIdeas();
+    })
+    .catch(() => showToast('Could not save idea', 'error'));
+}
+
+function refineIdea() {
+  const data = getIdeaFormData();
+  if (!data.raw_text) { showToast('Write your rough idea first!', 'warning'); return; }
+
+  document.getElementById('refine-loading').classList.remove('hidden');
+  document.getElementById('refine-result-wrapper').classList.add('hidden');
+
+  fetch('/api/refine-idea', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(data)
+  })
+    .then(r => r.json())
+    .then(resp => {
+      document.getElementById('refine-loading').classList.add('hidden');
+
+      if (resp.error) {
+        showToast('AI error: ' + resp.error, 'error');
+        return;
+      }
+
+      currentIdeaData = resp;
+      document.getElementById('refine-result-text').textContent = resp.refined || '';
+      document.getElementById('refine-result-wrapper').classList.remove('hidden');
+
+      if (resp.titles && resp.titles.length) {
+        document.getElementById('suggested-titles-wrapper').classList.remove('hidden');
+        document.getElementById('suggested-titles-list').innerHTML = resp.titles.map((t, i) => `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="font-size:12px;color:var(--text-3);width:18px;">${i+1}.</span>
+            <span style="font-size:14px;color:var(--text);flex:1;">${escHtml(t)}</span>
+            <button class="btn btn-ghost btn-sm" onclick="useTitle('${escHtml(t.replace(/'/g,"\'"))}')">Use</button>
+          </div>
+        `).join('');
+      }
+    })
+    .catch(() => {
+      document.getElementById('refine-loading').classList.add('hidden');
+      showToast('Refinement failed', 'error');
+    });
+}
+
+function useTitle(title) {
+  document.getElementById('idea-title-input').value = title;
+}
+
+function generateOutline() {
+  const title = document.getElementById('idea-title-input').value.trim() ||
+                document.getElementById('idea-raw').value.trim().slice(0, 80);
+  const tone = document.getElementById('idea-tone').value;
+
+  document.getElementById('outline-wrapper').classList.remove('hidden');
+  document.getElementById('outline-content').textContent = 'Generating outline…';
+
+  fetch('/api/generate-outline', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ title, tone })
+  })
+    .then(r => r.json())
+    .then(resp => {
+      document.getElementById('outline-content').textContent = resp.outline || resp.error || '';
+    })
+    .catch(() => document.getElementById('outline-content').textContent = 'Could not generate outline.');
+}
+
+function saveRefinedIdea() {
+  const data = getIdeaFormData();
+  data.refined_text = currentIdeaData.refined || '';
+  data.suggested_titles = currentIdeaData.titles || [];
+  data.keywords = currentIdeaData.keywords || [];
+  data.status = 'refined';
+
+  const method = data.id ? 'PUT' : 'POST';
+  const url = data.id ? `/api/ideas/${data.id}` : '/api/ideas';
+
+  fetch(url, {
+    method,
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(data)
+  })
+    .then(r => r.json())
+    .then(resp => {
+      showToast('Refined idea saved!', 'success');
+      if (!data.id) document.getElementById('idea-id').value = resp.id;
+      loadIdeas();
+    });
+}
+
+function writeDraftFromIdea() {
+  const title = document.getElementById('idea-title-input').value.trim() ||
+                currentIdeaData.titles?.[0] || 'Untitled Draft';
+  window.location.href = '/editor?title=' + encodeURIComponent(title);
+}
+
+function loadIdeas() {
+  fetch('/api/ideas')
+    .then(r => r.json())
+    .then(data => {
+      const list = document.getElementById('ideas-list');
+      document.getElementById('idea-list-count').textContent = `${data.ideas.length} ideas`;
+      document.getElementById('nav-idea-count').textContent = data.ideas.length;
+
+      if (!data.ideas.length) {
+        list.innerHTML = `<div class="empty-state">
+          <div class="empty-icon">💡</div>
+          <div class="empty-title">No ideas yet</div>
+          <div class="empty-desc">Capture your first idea using the form on the left.</div>
+        </div>`;
+        return;
+      }
+
+      list.innerHTML = data.ideas.map(idea => `
+        <div class="idea-card mb-16" onclick="editIdea(${idea.id})">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span class="idea-status status-${idea.status}">${idea.status}</span>
+            <span class="text-xs text-muted">${formatDate(idea.updated_at)}</span>
+          </div>
+          <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:4px;">${escHtml(idea.title || 'Untitled Idea')}</div>
+          <div class="text-sm text-muted" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">
+            ${escHtml(idea.raw_text || '')}
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px;" onclick="event.stopPropagation()">
+            <button class="btn btn-ghost btn-sm" onclick="editIdea(${idea.id})">✏️ Edit</button>
+            <button class="btn btn-secondary btn-sm" onclick="writeDraftFromIdeaId(${idea.id},'${escHtml((idea.title||'Untitled').replace(/'/g,"\\'"))}')">📝 Draft</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteIdea(${idea.id})">Delete</button>
+          </div>
+        </div>
+      `).join('');
+    });
+}
+
+function editIdea(id) {
+  fetch(`/api/ideas/${id}`)
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('idea-id').value = data.id;
+      document.getElementById('idea-raw').value = data.raw_text || '';
+      document.getElementById('idea-title-input').value = data.title || '';
+      document.getElementById('idea-tone').value = data.tone || 'professional';
+      document.getElementById('idea-form-title').textContent = '✏️ Editing Idea';
+      document.getElementById('idea-cancel-btn').classList.remove('hidden');
+      document.getElementById('refine-result-wrapper').classList.add('hidden');
+      window.scrollTo({top: 0, behavior: 'smooth'});
+    });
+}
+
+function cancelIdeaEdit() {
+  document.getElementById('idea-id').value = '';
+  document.getElementById('idea-raw').value = '';
+  document.getElementById('idea-title-input').value = '';
+  document.getElementById('idea-form-title').textContent = '💡 Capture an Idea';
+  document.getElementById('idea-cancel-btn').classList.add('hidden');
+  document.getElementById('refine-result-wrapper').classList.add('hidden');
+  clearImage();
+}
+
+function deleteIdea(id) {
+  if (!confirm('Delete this idea?')) return;
+  fetch(`/api/ideas/${id}`, { method: 'DELETE' })
+    .then(() => { showToast('Deleted', 'success'); loadIdeas(); });
+}
+
+function writeDraftFromIdeaId(id, title) {
+  window.location.href = '/editor?title=' + encodeURIComponent(title) + '&idea_id=' + id;
+}
+
+function openNewIdeaModal() { cancelIdeaEdit(); }
+</script>
+{% endblock %}
